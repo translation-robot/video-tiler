@@ -26,7 +26,7 @@ APP_NAME = 'videotiler'
 PROGRAM_VERSION = "1.0"
 PROGRAM_AUTHOR = "Bluesun"
 AUTHOR_EMAIL = "smtv.bot@gmail.com"
-AUTHOR_WEBSITE = "https://github.com/translation-robot"
+AUTHOR_WEBSITE = "https://github.com/translation-robot/video-tiler"
 
 # URL for "Why Tiling" page
 WHY_TILING_URL = "https://suprememastertv.com/en1/v/245875177398.html"
