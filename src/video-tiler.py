@@ -3,7 +3,7 @@ import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
-from tkinter import font
+from tkinter import font as tkfont
 import webbrowser
 from screeninfo import get_monitors
 from prettytable import PrettyTable
@@ -14,6 +14,9 @@ import traceback
 import psutil  # For process handling
 import time
 import appdirs
+import pygetwindow as gw
+import win32process
+
 
 # Left to do:
 # Add a loop check box
@@ -31,6 +34,9 @@ AUTHOR_WEBSITE = "https://github.com/translation-robot/video-tiler"
 # URL for "Why Tiling" page
 WHY_TILING_URL = "https://suprememastertv.com/en1/v/245875177398.html"
 SUPPORTED_WEB_SITES = "https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md"
+SOURCE_CODE_GITHUB = "https://github.com/translation-robot/video-tiler"
+
+json_configuration_url='https://raw.githubusercontent.com/translation-robot/video-tiler/main/src/configuration/configuration.json'
 
 # File to store the number of divisions
 DIVISIONS_FILE_NAME = 'divisions.txt'
@@ -98,9 +104,59 @@ def write_divisions(divisions):
     with open(DIVISIONS_FILE, 'w') as file:
         file.write(str(divisions))
 
+class TimerWindow:
+    def __init__(self, parent, title, question, duration):
+        self.parent = tk.Toplevel(parent)  # Create a separate window
+        self.parent.title(title)  # Set the window title dynamically
+        self.duration = duration
+        self.remaining = duration
+        
+        self.question_var = tk.StringVar(value=question)
+        self.do_not_ask_var = tk.BooleanVar(value=False)  # Checkbox state
+        self.result = None  # Store the result of OK/Cancel
+        self.expired = False  # Track if the timer expired
+
+        # Create UI elements
+        self.label = tk.Label(self.parent, textvariable=self.question_var)
+        self.label.pack(pady=20)
+
+        self.timer_label = tk.Label(self.parent, text=f"Time remaining: {self.remaining} seconds")
+        self.timer_label.pack(pady=10)
+
+        #self.checkbox = tk.Checkbutton(self.parent, text="Do not ask again", variable=self.do_not_ask_var)
+        #self.checkbox.pack(pady=10)
+
+        self.ok_button = tk.Button(self.parent, text="OK", command=self.ok)
+        self.ok_button.pack(side=tk.LEFT, padx=20)
+
+        self.cancel_button = tk.Button(self.parent, text="Cancel", command=self.cancel)
+        self.cancel_button.pack(side=tk.RIGHT, padx=20)
+
+        self.update_timer()
+        
+    def update_timer(self):
+        if self.remaining > 0:
+            self.remaining -= 1
+            self.timer_label.config(text=f"Time remaining: {self.remaining} seconds")
+            self.parent.after(1000, self.update_timer)  # Call this function again after 1 second
+        else:
+            self.expired = True  # Mark as expired
+            self.cancel()  # Automatically call cancel when time is up
+
+    def ok(self):
+        self.result = True  # OK was pressed
+        self.parent.destroy()
+
+    def cancel(self):
+        self.result = False  # Cancel was pressed
+        self.parent.destroy()
+        
+        
 class YouTubeVideo:
-    def __init__(self, url, divisions=None, verbose=True):
+    def __init__(self, parent, url, divisions=None, verbose=True):
+        self.parent = parent  # Store reference to the Tkinter parent (App instance)
         self.url = url
+        
         try:
             if divisions is None:
                 self.divisions = read_divisions()
@@ -255,6 +311,61 @@ class YouTubeVideo:
             else:
                 print("No suitable format found.")
 
+    def check_timer_result(self, timer_window):
+        self.parent.wait_window(timer_window.parent)  # Wait for the TimerWindow to close
+
+        if timer_window.expired:
+            print("The timer expired before user response.")
+        elif timer_window.result:  # If OK was pressed
+            print("User chose to restart the video.")
+        else:
+            print("User chose to cancel.")
+            self.parent.update_status("Ready")
+            
+    def _is_ffmpeg_descendant_with_window(self, timeout=30):
+        current_pid = psutil.Process().pid
+        start_time = time.time()
+
+        def has_window(pid):
+            for window in gw.getAllWindows():
+                if window._hWnd:  # Ensure the window handle is valid
+                    _, window_pid = win32process.GetWindowThreadProcessId(window._hWnd)
+                    if window_pid == pid:
+                        return True
+            return False
+
+        while (time.time() - start_time) < timeout:
+            # Get the current process
+            current_process = psutil.Process(current_pid)
+
+            # Check for yt-dlp child processes
+            yt_dlp_exists = any(child.name() == 'yt-dlp.exe' for child in current_process.children(recursive=True))
+
+            if not yt_dlp_exists:
+                print("no yt-dlp process exists")
+                return False  # Return False immediately if no yt-dlp child process exists
+
+            # Iterate over the children of the current process to check for ffplay
+            for child in current_process.children(recursive=True):
+                try:
+                    # Check for yt-dlp child processes
+                    ffplay_exists = any(child.name() == 'ffplay.exe' for child in current_process.children(recursive=True))
+
+                    if not ffplay_exists:
+                        print("no yt-dlp process exists")
+                        return False  # Return False immediately if no yt-dlp child process exists
+                        
+                    # Check if the child process is ffplay
+                    if child.name() == 'ffplay.exe':
+                        if has_window(child.pid):  # Use child.pid to check for the window
+                            return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            time.sleep(1)  # Check every second
+
+        return False
+
 
 
     def play_video(self):
@@ -316,27 +427,60 @@ class YouTubeVideo:
             print(f"yt-dlp process PID: {self.process_pid}")
 
             # Monitor yt-dlp process
+            ffplay_alive = False
             while self.play_flag:  # Continue to monitor if play flag is set
                 try:
-                    # Check if yt-dlp process is still running
-                    if self.process.poll() is not None:  # Check if process is terminated
-                        print("yt-dlp process terminated. Restarting...")
-                        break
-                    
-                    # Check if ffplay process is still running
-                    current_process = psutil.Process()
-                    ffplay_alive = False
-                    for child in current_process.children(recursive=True):
-                        if child.name() == 'ffplay' or child.name() == 'ffplay.exe':
-                            ffplay_alive = True
+                    print("Loop 1")
+                    if self._is_ffmpeg_descendant_with_window():
+                        if ffplay_alive == False:
+                            print("ffmpeg window is running.")
+                        ffplay_alive = True
+                    else:
+                        if ffplay_alive == True:
+                            print("No descendant ffmpeg process with a window found.")
+                        ffplay_alive = False
+                        
                     
                     # If ffplay is not running but yt-dlp is, restart yt-dlp and ffplay
                     if not ffplay_alive:
+                        #timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                        if self.parent.auto_restart_video.get() == True:
+                            if self.play_flag == True:
+                                print("Starting OK/Cancell window")
+                                timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                            else:
+                                return
+                        else:
+                            self.parent.update_status(f"Ready")
+                            return
+                        
+                        #self.parent.root.wait_window(timer_window.parent)
+                        self.parent.wait_window(timer_window.parent)
+                        if timer_window.expired:
+                            print("The timer expired before user response.")
+                            timer_window.result = True
+                        # Access the result and the checkbox value after the window has been closed
+                        if timer_window.result:  # If OK was pressed
+                            print("User chose to restart the video.")
+                        else:
+                            print("User chose to cancel or timer expired.")
+                            self.parent.update_status(f"Ready")
+                            return
+
+                        # Check if "Do not ask again" was selected
+                        if timer_window.do_not_ask_var:
+                            print("User checked 'Do not ask again'.")
+                        else:
+                            print("User did not check 'Do not ask again'.")
+                            
+                        
                         print("ffplay process terminated. Restarting yt-dlp and ffplay...")
                         #self.stop_video()  # Ensure old processes are terminated
                         break
     
                     if self.process.poll() is not None:  # Check if process is terminated
+                        #timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                        #timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
                         print("yt-dlp process terminated. Restarting...")
                         self.play_video
                         break
@@ -347,6 +491,7 @@ class YouTubeVideo:
                 time.sleep(1)  # Check every second
 
     def stop_video(self):
+        self.play_flag = False
         if self.process_pid:
             print("Stopping video")
             try:
@@ -381,6 +526,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Video Tiler")
+        self.is_ffmpeg_visible = False
         #self.geometry("600x300")  # Set window size to 600x300
         
         # Set the app icon
@@ -434,31 +580,51 @@ class App(tk.Tk):
         self.play_button = tk.Button(self, text="▶", command=self.play_video, width=5, height=2, bg='blue', fg='white')
         self.play_button.grid(row=3, column=4, padx=10, pady=10)
 
+        # Checkbox
+        self.auto_restart_video = tk.BooleanVar(value=True)  # Checkbox state
+        self.auto_restart_checkbutton = tk.Checkbutton(self, text="Auto Restart Video", variable=self.auto_restart_video)
+        self.auto_restart_checkbutton.grid(row=4, column=1, padx=10, pady=10, sticky='w')  # Use Checkbutton and grid it
+
+        
         # Status bar
         self.status_bar = tk.Label(self, text="Status: Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W)
-        self.status_bar.grid(row=4, column=1, columnspan=5, padx=10, pady=10, sticky='ew')
+        self.status_bar.grid(row=5, column=1, columnspan=5, padx=10, pady=10, sticky='ew')
 
         # Bind URL entry change to update video title
         self.url_entry.bind("<FocusOut>", self.update_video_title)
 
         # Configure grid resizing
-        self.grid_rowconfigure(4, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=0)
+        self.grid_rowconfigure(2, weight=0)
+        self.grid_rowconfigure(3, weight=0)
+        self.grid_rowconfigure(4, weight=0)
+        self.grid_rowconfigure(5, weight=0)
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=1)
         self.grid_columnconfigure(3, weight=1)
         self.grid_columnconfigure(4, weight=1)
-
-        
+    
     def create_menu(self):
         menubar = tk.Menu(self)
-        about_menu = tk.Menu(menubar, tearoff=0)
-        about_menu.add_command(label="Supported video sites", command=self.open_supported_video_site_list)
-        about_menu.add_command(label="Why Tiling", command=self.open_why_tiling)
-        about_menu.add_command(label="Help", command=self.show_help)
-        menubar.add_cascade(label="About", menu=about_menu)
-        self.config(menu=menubar)
 
+        # Define a custom font for the menu items
+        menu_font = tkfont.Font(family="Helvetica", size=12)
+
+        about_menu = tk.Menu(menubar, tearoff=0)
+
+        # Add commands with zero padding
+        about_menu.add_command(label="Supported video sites", command=self.open_supported_video_site_list, font=menu_font)
+        about_menu.add_command(label="Why Tiling", command=self.open_why_tiling, font=menu_font)
+        about_menu.add_command(label="Source code", command=self.open_source_code_web_site, font=menu_font)
+        about_menu.add_command(label="Help", command=self.show_help, font=menu_font)
+
+        menubar.add_cascade(label="About", menu=about_menu)
+
+        # Configure the menu bar with zero padding (if applicable)
+        self.config(menu=menubar)
+        
     def show_help(self):
         help_text = f"Program Version: {PROGRAM_VERSION}\nEmail: {AUTHOR_EMAIL}\nWebsite: {AUTHOR_WEBSITE}"
         messagebox.showinfo("Help", help_text)
@@ -468,6 +634,9 @@ class App(tk.Tk):
         
     def open_supported_video_site_list(self):
         webbrowser.open(SUPPORTED_WEB_SITES)
+        
+    def open_source_code_web_site(self):
+        webbrowser.open(SOURCE_CODE_GITHUB)
 
 
     def update_video_title(self, event=None):
@@ -475,7 +644,7 @@ class App(tk.Tk):
         if url != (self.yt_video.url if self.yt_video else ""):
             if self.yt_video:
                 self.stop_video()  # Stop any currently playing video
-            self.yt_video = YouTubeVideo(url, int(self.divisions_spinbox.get()))
+            self.yt_video = YouTubeVideo(self, url, int(self.divisions_spinbox.get()))
             self.after(100, self._update_title_label)
 
     def _update_title_label(self):
@@ -484,11 +653,12 @@ class App(tk.Tk):
 
     def play_video(self):
         self.stop_video()  # Stop any currently playing video
+        self.is_ffmpeg_visible = False
         
         # Start video playback in a separate thread
         url = self.url_entry.get()
         divisions = int(self.divisions_spinbox.get())
-        self.yt_video = YouTubeVideo(url, divisions)
+        self.yt_video = YouTubeVideo(self, url, divisions)
         
         # Show temporary starting message
         try:

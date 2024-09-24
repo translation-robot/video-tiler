@@ -4,7 +4,7 @@
 SET PATH=C:\Python311;C:\Python311\bin;%PATH%
 
 
-pyinstaller video-tiler.py  --icon=.\img\app.ico --noconfirm 
+pyinstaller --clean src\video-tiler.py  --icon=tiler.ico --noconfirm 
 REM --windowed
 
 
