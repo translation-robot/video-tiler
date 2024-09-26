@@ -43,6 +43,10 @@ DIVISIONS_FILE_NAME = 'divisions.txt'
 
 DEFAULT_URL = "https://www.youtube.com/watch?v=ZzWBpGwKoaI"
 
+DefaultJsonConfiguration = """{
+    "streaming_url_array": ["https://www.youtube.com/watch?v=ZzWBpGwKoaI", "https://x.com/i/broadcasts/1gqGvNDqqZgGB"],
+    "streaming_url_user_added_array": []
+}"""
 
 def add_to_path():
     # Get the directory of the current script
@@ -383,30 +387,37 @@ class YouTubeVideo:
 
         useragent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 
-        # yt-dlp command
-        if self.format is not None:
-            #print("Using default format")
-            yt_dlp_command = [
-                self.yt_dlp_path, self.url, '--user-agent', useragent, '-4', '-f', self.format, '-o', '-',
-                '--quiet', '--no-warnings'
-            ]
-        else:
-            #self.format
-            #print(f"Using format {self.format}") '--user-agent', useragent, 
-            yt_dlp_command = [
-                self.yt_dlp_path, self.url, '-4', '-f', 'bestvideo+bestaudio/best', '-o', '-',
-                '--quiet', '--no-warnings'
-            ]
-        
-        # ffplay command
-        ffplay_command = [
-            self.ffplay_path, '-', '-vf',
-            f'scale=w=iw*{self.divisions}/{self.divisions}:h=ih*{self.divisions}/{self.divisions},'
-            f'fps=source_fps*{self.divisions}*{self.divisions},tile={self.divisions}x{self.divisions}',
-            '-autoexit', '-loglevel', 'error', '-hide_banner', '-fs'
-        ]
 
         while self.play_flag:  # Check play flag to 
+            self.url = self.parent.url_entry.get()
+            self.divisions = int(self.parent.divisions_spinbox.get())
+            write_divisions(self.divisions)
+            # yt-dlp command
+            if self.format is not None:
+                #print("Using default format")
+                yt_dlp_command = [
+                    self.yt_dlp_path, self.url, '--user-agent', useragent, '-4', '-f', self.format, '-o', '-',
+                    '--quiet', '--no-warnings'
+                ]
+            else:
+                #self.format
+                #print(f"Using format {self.format}") '--user-agent', useragent, 
+                yt_dlp_command = [
+                    self.yt_dlp_path, self.url, '-4', '-f', 'bestvideo+bestaudio/best', '-o', '-',
+                    '--quiet', '--no-warnings'
+                ]
+            
+            # ffplay command
+            ffplay_command = [
+                self.ffplay_path, '-', '-vf',
+                f'scale=w=iw*{self.divisions}/{self.divisions}:h=ih*{self.divisions}/{self.divisions},'
+                f'fps=source_fps*{self.divisions}*{self.divisions},tile={self.divisions}x{self.divisions}',
+                '-autoexit', '-loglevel', 'error', '-hide_banner', '-fs'
+            ]
+
+        
+        
+        
             if self.process:
                 self.process.terminate()
                 self.process.wait()
@@ -563,8 +574,14 @@ class App(tk.Tk):
         self.url_label = tk.Label(self, text="Video URL:", font=("Helvetica", 12))
         self.url_label.grid(row=2, column=1, padx=10, pady=10, sticky='w')
 
-        self.url_entry = tk.Entry(self, width=50)
+        array_url = ["https://www.youtube.com/watch?v=ZzWBpGwKoaI", "https://x.com/i/broadcasts/1gqGvNDqqZgGB"]
+
+        #self.url_entry = tk.Entry(self, width=50)
+        
+        self.url_entry = ttk.Combobox(self, values=array_url, width=50)
+        self.url_entry.set('')  # Optional: Set default text
         self.url_entry.grid(row=2, column=2, columnspan=3, padx=10, pady=10, sticky='w')
+
 
         # Spinbox for divisions
         self.divisions_label = tk.Label(self, text="Grid divisions:", font=("Helvetica", 12))

@@ -1,3 +1,3 @@
-python video-tiler.py
+python src\video-tiler.py
 
 PAUSE
