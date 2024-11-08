@@ -130,8 +130,8 @@ class TimerWindow:
         #self.checkbox = tk.Checkbutton(self.parent, text="Do not ask again", variable=self.do_not_ask_var)
         #self.checkbox.pack(pady=10)
 
-        self.ok_button = tk.Button(self.parent, text="OK", command=self.ok)
-        self.ok_button.pack(side=tk.LEFT, padx=20)
+        #self.ok_button = tk.Button(self.parent, text="OK", command=self.ok)
+        #self.ok_button.pack(side=tk.LEFT, padx=20)
 
         self.cancel_button = tk.Button(self.parent, text="Cancel", command=self.cancel)
         self.cancel_button.pack(side=tk.RIGHT, padx=20)
@@ -160,6 +160,10 @@ class YouTubeVideo:
     def __init__(self, parent, url, divisions=None, verbose=True):
         self.parent = parent  # Store reference to the Tkinter parent (App instance)
         self.url = url
+        self.timer_window = None
+        self.ytdlp_process = None
+        self.ytdlp_process = None
+        self.ytdlp_is_valid = False
         
         try:
             if divisions is None:
@@ -183,8 +187,14 @@ class YouTubeVideo:
         if not self.yt_dlp_path or not self.ffmpeg_path or not self.ffplay_path:
             raise FileNotFoundError("One or more required executables (yt-dlp, ffmpeg, ffplay) not found.")
 
-        self._get_video_info()
-        self._get_screen_resolution()
+        try:
+            self._get_video_info()
+            self._get_screen_resolution()
+            self.ytdlp_is_valid = True
+        except Exception as e:
+            # Handle errors here (e.g., invalid URL, video not available)
+            print(f"Error creating YouTube video: {e}")
+            return
         #self._choose_format()
 
     def _get_video_info(self):
@@ -418,23 +428,25 @@ class YouTubeVideo:
         
         
         
-            if self.process:
-                self.process.terminate()
-                self.process.wait()
+            if self.ytdlp_process:
+                self.ytdlp_process.terminate()
+                self.ytdlp_process.wait()
+                exit_code = self.ytdlp_process.returncode
+                print(f"yt-dlp process exited with exit code {exit_code}")
                 print("Previous yt-dlp process terminated.")
                 
             # Use subprocess.PIPE to handle the pipe
             print(yt_dlp_command)
             print(ffplay_command)
-            self.process = subprocess.Popen(
+            self.ytdlp_process = subprocess.Popen(
                 yt_dlp_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             
-            ffplay_process = subprocess.Popen(
-                ffplay_command, stdin=self.process.stdout, stderr=subprocess.PIPE
+            self.ffplay_process = subprocess.Popen(
+                ffplay_command, stdin=self.ytdlp_process.stdout, stderr=subprocess.PIPE
             )
             
-            self.process_pid = ffplay_process.pid
+            self.process_pid = self.ffplay_process.pid
             print(f"yt-dlp process PID: {self.process_pid}")
 
             # Monitor yt-dlp process
@@ -450,15 +462,16 @@ class YouTubeVideo:
                         if ffplay_alive == True:
                             print("No descendant ffmpeg process with a window found.")
                         ffplay_alive = False
+                        self.parent.play_button.config(state=tk.NORMAL)
                         
                     
                     # If ffplay is not running but yt-dlp is, restart yt-dlp and ffplay
                     if not ffplay_alive:
-                        #timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                        #self.timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
                         if self.parent.auto_restart_video.get() == True:
                             if self.play_flag == True:
                                 print("Starting OK/Cancell window")
-                                timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                                self.timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped and will be restarted automatically.", duration=10)
                             else:
                                 return
                         else:
@@ -466,20 +479,25 @@ class YouTubeVideo:
                             return
                         
                         #self.parent.root.wait_window(timer_window.parent)
-                        self.parent.wait_window(timer_window.parent)
-                        if timer_window.expired:
+                        self.parent.wait_window(self.timer_window.parent)
+                        if self.timer_window.expired:
                             print("The timer expired before user response.")
-                            timer_window.result = True
+                            self.timer_window.result = True
                         # Access the result and the checkbox value after the window has been closed
-                        if timer_window.result:  # If OK was pressed
+                        if self.timer_window.result:  # If OK was pressed
                             print("User chose to restart the video.")
                         else:
                             print("User chose to cancel or timer expired.")
                             self.parent.update_status(f"Ready")
+                                        
+                            self.ytdlp_process.wait()
+                            exit_code = self.ytdlp_process.returncode
+                            print(f"yt-dlp process exited with exit code {exit_code}")
+                            print("Previous yt-dlp process terminated.")
                             return
 
                         # Check if "Do not ask again" was selected
-                        if timer_window.do_not_ask_var:
+                        if self.timer_window.do_not_ask_var:
                             print("User checked 'Do not ask again'.")
                         else:
                             print("User did not check 'Do not ask again'.")
@@ -489,10 +507,14 @@ class YouTubeVideo:
                         #self.stop_video()  # Ensure old processes are terminated
                         break
     
-                    if self.process.poll() is not None:  # Check if process is terminated
-                        #timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
-                        #timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                    if self.ytdlp_process.poll() is not None:  # Check if process is terminated
+                        #self.timer_window = TimerWindow(self, self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
+                        #self.timer_window = TimerWindow(parent=self.parent, title="Action Required", question="Video was stopped, do you want to restart it?", duration=10)
                         print("yt-dlp process terminated. Restarting...")
+                        
+                        exit_code = self.ytdlp_process.returncode
+                        print(f"yt-dlp process exited with exit code {exit_code}")
+                        print("Previous yt-dlp process terminated.")
                         self.play_video
                         break
                 except:
@@ -500,9 +522,12 @@ class YouTubeVideo:
                     print(var)
                     print("Sleep 1")
                 time.sleep(1)  # Check every second
+        self.parent.play_button.config(state=tk.NORMAL)
 
     def stop_video(self):
         self.play_flag = False
+        if self.timer_window is not None:
+            self.timer_window.parent.destroy()
         if self.process_pid:
             print("Stopping video")
             try:
@@ -628,6 +653,7 @@ class App(tk.Tk):
 
         # Define a custom font for the menu items
         menu_font = tkfont.Font(family="Helvetica", size=12)
+        menu_font_small = tkfont.Font(family="Helvetica", size=8)
 
         about_menu = tk.Menu(menubar, tearoff=0)
 
@@ -637,7 +663,7 @@ class App(tk.Tk):
         about_menu.add_command(label="Source code", command=self.open_source_code_web_site, font=menu_font)
         about_menu.add_command(label="Help", command=self.show_help, font=menu_font)
 
-        menubar.add_cascade(label="About", menu=about_menu)
+        menubar.add_cascade(label="About", menu=about_menu, font=menu_font_small)
 
         # Configure the menu bar with zero padding (if applicable)
         self.config(menu=menubar)
@@ -671,11 +697,19 @@ class App(tk.Tk):
     def play_video(self):
         self.stop_video()  # Stop any currently playing video
         self.is_ffmpeg_visible = False
+        self.play_button.config(state=tk.DISABLED)
         
         # Start video playback in a separate thread
         url = self.url_entry.get()
         divisions = int(self.divisions_spinbox.get())
+        
         self.yt_video = YouTubeVideo(self, url, divisions)
+        if self.yt_video.ytdlp_is_valid == False:
+            print("Video URL is not valid")
+            messagebox.showerror("URL Error", f"URL '{url}' does not seem to be a valid video.")
+            self.play_button.config(state=tk.NORMAL)
+            return
+            
         
         # Show temporary starting message
         try:
