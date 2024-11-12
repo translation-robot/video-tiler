@@ -220,6 +220,8 @@ class YouTubeVideo:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(self.url, download=False)
             formats = result.get('formats', [])
+            #print(formats)
+            #input("Formats listed (all)")
 
             # Filter out vp09 codecs
             video_audio_formats = [
@@ -237,9 +239,13 @@ class YouTubeVideo:
             ]
             audio_formats = [
                 f for f in formats 
-                if 'acodec' in f and not f.get('vcodec', '').startswith('vp09')  # Exclude vp09 codecs
-                and f.get('vcodec') == 'none'
+                if f.get('vcodec') == 'none'
+                #    and 'acodec' in f  # Exclude vp09 codecs
             ]
+            
+            #print("Audio codecs")
+            #print(audio_formats)
+            #input("Formats audio (all)")
 
             # Sort formats
             video_audio_formats.sort(key=lambda x: (x.get('height', 0), x.get('width', 0)))
@@ -295,7 +301,7 @@ class YouTubeVideo:
                     break
 
             # Step 2: If no suitable video+audio format, combine separate video and audio formats
-            if not selected_format:
+            if not selected_format or selected_format is None:
                 selected_video_format = None
                 selected_audio_format = None
 
@@ -599,7 +605,7 @@ class App(tk.Tk):
         self.url_label = tk.Label(self, text="Video URL:", font=("Helvetica", 12))
         self.url_label.grid(row=2, column=1, padx=10, pady=10, sticky='w')
 
-        array_url = ["https://www.youtube.com/watch?v=ZzWBpGwKoaI", "https://x.com/i/broadcasts/1gqGvNDqqZgGB"]
+        array_url = ["https://www.youtube.com/watch?v=ZzWBpGwKoaI", "https://x.com/i/broadcasts/1LyxBgjebwOKN"]
 
         #self.url_entry = tk.Entry(self, width=50)
         
@@ -723,7 +729,7 @@ class App(tk.Tk):
         self.video_thread.start()
 
         # Update status after 17 seconds
-        self.after(17000, lambda: self.update_status(f"Playing video '{self.yt_video.title}'"))
+        self.after(35000, lambda: self.update_status(f"Playing video '{self.yt_video.title}'"))
         self._update_title_label()
 
     def stop_video(self):
